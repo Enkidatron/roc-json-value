@@ -641,12 +641,135 @@ expect
 
 ## Decode an optional field from a Json object. You must provide the value to use if the field is missing.
 optional_field : Recipe a, Str, a -> Recipe a
+optional_field = |@Recipe inner_recipe, field_name, default_item|
+    @Recipe |@Value(val)|
+        when val is
+            Object obj ->
+                when Dict.get(obj, field_name) is
+                    Ok(inner_val) -> inner_recipe(inner_val)
+                    Err(KeyNotFound) -> Ok(default_item)
+
+            _ -> Err(Failure(ExpectedObject, @Value(val)))
+
+expect
+    json_str = "{}"
+    recipe = optional_field(dec, "foo", 0)
+    actual = decode_str(json_str, recipe)
+    actual == Ok(0)
+
+expect
+    json_str =
+        """
+        {"foo": 42}
+        """
+    recipe = optional_field(dec, "foo", 0)
+    actual = decode_str(json_str, recipe)
+    actual == Ok(42)
+
+expect
+    json_str =
+        """
+        {"foo": null}
+        """
+    recipe = optional_field(dec, "foo", 0)
+    actual = decode_str(json_str, recipe)
+    Result.is_err(actual)
+
+expect
+    json_str = "null"
+    recipe = optional_field(dec, "foo", 0)
+    actual = decode_str(json_str, recipe)
+    Result.is_err(actual)
 
 ## Decode a field that may be `null` from a Json object. You must provide the value to use if the field is `null`.
 nullable_field : Recipe a, Str, a -> Recipe a
+nullable_field = |@Recipe inner_recipe, field_name, default_item|
+    @Recipe |@Value(val)|
+        when val is
+            Object(obj) ->
+                inner_val = Dict.get(obj, field_name) ? |_| Failure(ExpectedObjectWithField(field_name), @Value(val))
+                when inner_val is
+                    @Value(Null) -> Ok(default_item)
+                    _ ->
+                        item = inner_recipe(inner_val) ? |e| InField(field_name, e)
+                        Ok(item)
+
+            _ -> Err(Failure(ExpectedObjectWithField(field_name), @Value(val)))
+
+expect
+    json_str = "{}"
+    recipe = nullable_field(dec, "foo", 0)
+    actual = decode_str(json_str, recipe)
+    Result.is_err(actual)
+
+expect
+    json_str =
+        """
+        {"foo": 42}
+        """
+    recipe = nullable_field(dec, "foo", 0)
+    actual = decode_str(json_str, recipe)
+    actual == Ok(42)
+
+expect
+    json_str =
+        """
+        {"foo": null}
+        """
+    recipe = nullable_field(dec, "foo", 0)
+    actual = decode_str(json_str, recipe)
+    actual == Ok(0)
+
+expect
+    json_str = "null"
+    recipe = nullable_field(dec, "foo", 0)
+    actual = decode_str(json_str, recipe)
+    Result.is_err(actual)
 
 ## Decode an optional field that may be `null` from a Json object. You must provide the value to use if the field is missing or is `null`.
 optional_nullable_field : Recipe a, Str, a -> Recipe a
+optional_nullable_field = |@Recipe inner_recipe, field_name, default_item|
+    @Recipe |@Value(val)|
+        when val is
+            Object obj ->
+                when Dict.get(obj, field_name) is
+                    Ok(@Value(Null)) -> Ok(default_item)
+                    Err(KeyNotFound) -> Ok(default_item)
+                    Ok(inner_val) ->
+                        item = inner_recipe(inner_val) ? |e| InField(field_name, e)
+                        Ok(item)
+
+            _ -> Err(Failure(ExpectedObject, @Value(val)))
+
+expect
+    json_str = "{}"
+    recipe = optional_nullable_field(dec, "foo", 0)
+    actual = decode_str(json_str, recipe)
+    actual == Ok(0)
+
+expect
+    json_str =
+        """
+        {"foo": 42}
+        """
+    recipe = optional_nullable_field(dec, "foo", 0)
+    actual = decode_str(json_str, recipe)
+    actual == Ok(42)
+
+expect
+    json_str =
+        """
+        {"foo": null}
+        """
+    recipe = optional_nullable_field(dec, "foo", 0)
+    actual = decode_str(json_str, recipe)
+    actual == Ok(0)
+
+expect
+    json_str = "null"
+    recipe = optional_nullable_field(dec, "foo", 0)
+    actual = decode_str(json_str, recipe)
+    Result.is_err(actual)
 
 # Inconsistent Structure
 
