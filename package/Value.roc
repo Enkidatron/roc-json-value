@@ -17,19 +17,27 @@
 ##   "baz": 42
 ## }
 ## """
-## msg_id_recipe = field("id", one_of [ map(string, StringId), map(number, NumberId) ])
+## msg_id_recipe = field(
+##    one_of [
+##         map(string, StringId),
+##         map(u64, NumberId),
+##     ],
+##     "id",
+## )
 ##
 ## name = decode_str(json_str, msg_id_recipe)
 ## expect name == Ok (NumberId 123)
 ## ```
 module [
     Value,
-    json_decoder,
+    decoder,
+    Recipe,
+    Error,
+    RecipeError,
+    FailureReason,
     decode_str,
     decode_bytes,
     decode_val,
-    Error,
-    Recipe,
     string,
     bool,
     i8,
@@ -65,6 +73,7 @@ module [
     succeed,
     fail,
     and_then,
+    to_encoder,
     from_string,
     from_bool,
     from_i8,
@@ -79,16 +88,16 @@ module [
     null_val,
     from_list,
     from_list_val,
-    from_object,
+    from_key_value_pairs,
     from_dict,
 ]
 
 import json.Json
 
-# Decoding
-
 ## An opaque type that represents a JSON value.
 ## This has been deserialized and confirmed to be valid JSON.
+##
+## Implements the Eq, Decoding, and Encoding abilities.
 Value := [
     Null,
     String Str,
@@ -99,11 +108,14 @@ Value := [
 ]
     implements [
         Eq,
-        Decoding { decoder: json_decoder },
+        Decoding { decoder: decoder },
+        Encoding { to_encoder: to_encoder },
     ]
 
-json_decoder : Decoder Value Json.Json
-json_decoder = Decode.custom |bytes, fmt|
+# Decoding
+
+decoder : Decoder Value Json.Json
+decoder = Decode.custom |bytes, fmt|
     when bytes is
         [] -> { result: Err(TooShort), rest: [] }
         ['n', 'u', 'l', 'l', .. as rest] -> { result: Ok(@Value(Null)), rest: rest }
@@ -111,7 +123,7 @@ json_decoder = Decode.custom |bytes, fmt|
         ['t', 'r', 'u', 'e', .. as rest] -> { result: Ok(@Value(Boolean Bool.true)), rest: rest }
         ['f', 'a', 'l', 's', 'e', .. as rest] -> { result: Ok(@Value(Boolean Bool.false)), rest: rest }
         [c, ..] if (c >= '0' and c <= '9') or c == '-' -> Decode.decode_with bytes Decode.dec fmt |> Decode.map_result |i| @Value(Number i)
-        ['[', ..] -> Decode.decode_with bytes (Decode.list json_decoder) fmt |> Decode.map_result |a| @Value(Array a)
+        ['[', ..] -> Decode.decode_with bytes (Decode.list decoder) fmt |> Decode.map_result |a| @Value(Array a)
         ['{', ..] ->
             Decode.decode_with
                 bytes
@@ -122,7 +134,7 @@ json_decoder = Decode.custom |bytes, fmt|
                             Keep
                                 (
                                     Decode.custom |inner_bytes, innerFmt|
-                                        Decode.decode_with inner_bytes json_decoder innerFmt
+                                        Decode.decode_with inner_bytes decoder innerFmt
                                         |> Decode.map_result |json| Dict.insert so_far label json
                                 ))
                         (|decoded_dict, _fmt| Ok(@Value(Object decoded_dict)))
@@ -130,6 +142,38 @@ json_decoder = Decode.custom |bytes, fmt|
                 fmt
 
         _ -> { result: Err(TooShort), rest: bytes }
+
+## An opaque data type for attempting to turn a `Value` into your own data type.
+Recipe output := Value -> Result output RecipeError
+
+## Tag union of possible errors when decoding using a recipe.
+Error : [
+    ParseErr [
+            Leftover (List U8),
+            TooShort,
+        ],
+    RecipeErr RecipeError,
+]
+
+RecipeError : [
+    Failure FailureReason Value,
+    InField Str RecipeError,
+    InIndex U64 RecipeError,
+    OneOf (List RecipeError),
+]
+
+FailureReason : [
+    ExpectedString,
+    ExpectedBool,
+    ExpectedNull,
+    ExpectedNumber,
+    OutOfBounds,
+    ExpectedArray,
+    ExpectedObject,
+    ExpectedObjectWithField Str,
+    ExpectedArrayWithIndex U64,
+    CustomFailure Str,
+]
 
 ## Applies a recipe to a string. This parses the string into a `Value` and then applies the
 ## recipe to the resulting value.
@@ -188,40 +232,6 @@ expect
 expect
     actual = decode_val(Value.null_val, null(ValueWasNull))
     actual == Ok(ValueWasNull)
-
-## Tag union of possible errors when applying a recipe to a `Value`.
-##
-## `ParseErr` - The Str or bytes could not be parsed as Json.
-##
-## TODO: list the errors
-Error : [
-    ParseErr [
-            Leftover (List U8),
-            TooShort,
-        ],
-    RecipeErr RecipeError,
-]
-
-RecipeError : [
-    Failure FailureReason Value,
-    InField Str RecipeError,
-    InIndex U64 RecipeError,
-]
-
-FailureReason : [
-    ExpectedString,
-    ExpectedBool,
-    ExpectedNull,
-    ExpectedNumber,
-    OutOfBounds,
-    ExpectedArray,
-    ExpectedObject,
-    ExpectedObjectWithField Str,
-    ExpectedArrayWithIndex U64,
-]
-
-## An opaque data type for attempting to turn a `Value` into your own data type.
-Recipe output := Value -> Result output RecipeError
 
 # Primitives
 
@@ -775,30 +785,116 @@ expect
 
 ## Try multiple decoders until one succeeds.
 one_of : List (Recipe a) -> Recipe a
+one_of = |recipes|
+    @Recipe |val|
+        one_of_help = |recipes_so_far, errors|
+            when recipes_so_far is
+                [] -> Err(OneOf(errors))
+                [@Recipe(first_recipe), .. as rest] ->
+                    first_recipe(val)
+                    |> Result.on_err(
+                        |error|
+                            one_of_help(rest, List.append(errors, error)),
+                    )
+        one_of_help(recipes, [])
+
+expect
+    recipe = one_of([map(dec, NumId), map(string, StringId)])
+    actual = decode_str("42", recipe)
+    actual == Ok(NumId(42))
+
+expect
+    recipe = one_of([map(dec, NumId), map(string, StringId)])
+    actual = decode_str("\"test\"", recipe)
+    actual == Ok(StringId("test"))
+
+expect
+    recipe = one_of([map(dec, NumId), map(string, StringId)])
+    actual = decode_str("true", recipe)
+    Result.is_err(actual)
 
 # Mapping
 map : Recipe a, (a -> b) -> Recipe b
-map = |@Recipe inner_recipe_a, f|
-    @Recipe |val| inner_recipe_a val |> Result.map_ok f
+map = |@Recipe inner_recipe_a, fun|
+    @Recipe |val|
+        a = inner_recipe_a(val)?
+        Ok(fun(a))
 
 map2 : Recipe a, Recipe b, (a, b -> c) -> Recipe c
+map2 = |@Recipe inner_recipe_a, @Recipe inner_recipe_b, fun|
+    @Recipe |val|
+        a = inner_recipe_a(val)?
+        b = inner_recipe_b(val)?
+        Ok(fun(a, b))
 
 map3 : Recipe a, Recipe b, Recipe c, (a, b, c -> d) -> Recipe d
+map3 = |@Recipe inner_recipe_a, @Recipe inner_recipe_b, @Recipe inner_recipe_c, fun|
+    @Recipe |val|
+        a = inner_recipe_a(val)?
+        b = inner_recipe_b(val)?
+        c = inner_recipe_c(val)?
+        Ok(fun(a, b, c))
 
 map4 : Recipe a, Recipe b, Recipe c, Recipe d, (a, b, c, d -> e) -> Recipe e
+map4 = |@Recipe inner_recipe_a, @Recipe inner_recipe_b, @Recipe inner_recipe_c, @Recipe inner_recipe_d, fun|
+    @Recipe |val|
+        a = inner_recipe_a(val)?
+        b = inner_recipe_b(val)?
+        c = inner_recipe_c(val)?
+        d = inner_recipe_d(val)?
+        Ok(fun(a, b, c, d))
 
 map5 : Recipe a, Recipe b, Recipe c, Recipe d, Recipe e, (a, b, c, d, e -> f) -> Recipe f
+map5 = |@Recipe inner_recipe_a, @Recipe inner_recipe_b, @Recipe inner_recipe_c, @Recipe inner_recipe_d, @Recipe inner_recipe_e, fun|
+    @Recipe |val|
+        a = inner_recipe_a(val)?
+        b = inner_recipe_b(val)?
+        c = inner_recipe_c(val)?
+        d = inner_recipe_d(val)?
+        e = inner_recipe_e(val)?
+        Ok(fun(a, b, c, d, e))
 
 map6 : Recipe a, Recipe b, Recipe c, Recipe d, Recipe e, Recipe f, (a, b, c, d, e, f -> g) -> Recipe g
+map6 = |@Recipe inner_recipe_a, @Recipe inner_recipe_b, @Recipe inner_recipe_c, @Recipe inner_recipe_d, @Recipe inner_recipe_e, @Recipe inner_recipe_f, fun|
+    @Recipe |val|
+        a = inner_recipe_a(val)?
+        b = inner_recipe_b(val)?
+        c = inner_recipe_c(val)?
+        d = inner_recipe_d(val)?
+        e = inner_recipe_e(val)?
+        f = inner_recipe_f(val)?
+        Ok(fun(a, b, c, d, e, f))
 
 map7 : Recipe a, Recipe b, Recipe c, Recipe d, Recipe e, Recipe f, Recipe g, (a, b, c, d, e, f, g -> h) -> Recipe h
+map7 = |@Recipe inner_recipe_a, @Recipe inner_recipe_b, @Recipe inner_recipe_c, @Recipe inner_recipe_d, @Recipe inner_recipe_e, @Recipe inner_recipe_f, @Recipe inner_recipe_g, fun|
+    @Recipe |val|
+        a = inner_recipe_a(val)?
+        b = inner_recipe_b(val)?
+        c = inner_recipe_c(val)?
+        d = inner_recipe_d(val)?
+        e = inner_recipe_e(val)?
+        f = inner_recipe_f(val)?
+        g = inner_recipe_g(val)?
+        Ok(fun(a, b, c, d, e, f, g))
 
 map8 : Recipe a, Recipe b, Recipe c, Recipe d, Recipe e, Recipe f, Recipe g, Recipe h, (a, b, c, d, e, f, g, h -> i) -> Recipe i
+map8 = |@Recipe inner_recipe_a, @Recipe inner_recipe_b, @Recipe inner_recipe_c, @Recipe inner_recipe_d, @Recipe inner_recipe_e, @Recipe inner_recipe_f, @Recipe inner_recipe_g, @Recipe inner_recipe_h, fun|
+    @Recipe |val|
+        a = inner_recipe_a(val)?
+        b = inner_recipe_b(val)?
+        c = inner_recipe_c(val)?
+        d = inner_recipe_d(val)?
+        e = inner_recipe_e(val)?
+        f = inner_recipe_f(val)?
+        g = inner_recipe_g(val)?
+        h = inner_recipe_h(val)?
+        Ok(fun(a, b, c, d, e, f, g, h))
 
 # Fancy decoding
 
 ## "Decode" this Json `Value` as a `Value`. Perhaps you are going to finish decoding it later.
 value : Recipe Value
+value = @Recipe |val| Ok(val)
 
 ## Decode a `null` Json value into some Roc value of your choice.
 null : a -> Recipe a
@@ -810,48 +906,297 @@ null = |a|
 
 ## Successfully "decode" the provided value, regardless of the Json.
 succeed : a -> Recipe a
+succeed = |a|
+    @Recipe |_| Ok(a)
 
 ## Always fail. You provide the error message.
 fail : Str -> Recipe a
+fail = |words|
+    @Recipe |val| Err(Failure(CustomFailure(words), val))
 
 ## Create decoders where the next stage depends on the results of the earlier stage.
 and_then : Recipe a, (a -> Recipe b) -> Recipe b
+and_then = |@Recipe inner_recipe_a, fun|
+    @Recipe |val|
+        a = inner_recipe_a(val)?
+        @Recipe(inner_recipe_b) = fun(a)
+        inner_recipe_b(val)
+
+expect
+    json_str =
+        """
+        {"type": "string", "text": "Hello", "num": 42}
+        """
+    recipe =
+        field(string, "type")
+        |> and_then(
+            |type_str|
+                when type_str is
+                    "string" -> field(string, "text")
+                    "number" -> field(dec, "num") |> map(Num.to_str)
+                    _ -> fail("Invalid type"),
+        )
+    actual = decode_str(json_str, recipe)
+    actual == Ok("Hello")
 
 # Encoding
+
+to_encoder : Value -> Encoder fmt where fmt implements EncoderFormatting
+to_encoder = |@Value(val)|
+    Encode.custom |bytes, fmt|
+        when val is
+            Null -> List.concat(bytes, ['n', 'u', 'l', 'l'])
+            String(str) -> Encode.append(bytes, str, fmt)
+            Boolean(b) -> Encode.append(bytes, b, fmt)
+            Number(x) ->
+                when Str.to_utf8(Num.to_str(x)) is
+                    [.. as new_bytes, '.', '0'] | new_bytes -> List.concat(bytes, new_bytes)
+
+            Array(items) ->
+                new_bytes =
+                    when items is
+                        [] -> ['[', ']']
+                        [first, .. as rest] ->
+                            beginning = Encode.append_with(['['], to_encoder(first), fmt)
+                            middle = List.walk(
+                                rest,
+                                [],
+                                |so_far, item|
+                                    so_far
+                                    |> List.append(',')
+                                    |> Encode.append_with(to_encoder(item), fmt),
+                            )
+                            end = [']']
+                            List.join([beginning, middle, end])
+                List.concat(bytes, new_bytes)
+
+            Object(obj) ->
+                (inner_bytes, _) = Dict.walk(
+                    obj,
+                    ([], []),
+                    |(so_far, sep), k, v|
+                        new_bytes =
+                            so_far
+                            |> List.concat(sep)
+                            |> Encode.append(k, fmt)
+                            |> List.append(':')
+                            |> Encode.append_with(to_encoder(v), fmt)
+                        (new_bytes, [',']),
+                )
+                bytes |> List.append('{') |> List.concat(inner_bytes) |> List.append('}')
 
 ## Create a `Value` from a `Str`. This can be useful if you want to encode variably-shaped data.
 from_string : Str -> Value
 from_string = |text| @Value(String(text))
 
+expect
+    actual = Encode.to_bytes(from_string("hello"), Json.utf8)
+    expected = Str.to_utf8("\"hello\"")
+    actual == expected
+
 from_bool : Bool -> Value
 from_bool = |b| @Value(Boolean(b))
 
+expect
+    actual = Encode.to_bytes(from_bool(Bool.true), Json.utf8)
+    expected = Str.to_utf8("true")
+    actual == expected
+
+expect
+    actual = Encode.to_bytes(from_bool(Bool.false), Json.utf8)
+    expected = Str.to_utf8("false")
+    actual == expected
+
 from_i8 : I8 -> Value
+from_i8 = |x| @Value(Number(Num.to_frac(x)))
+
+expect
+    actual = Encode.to_bytes(from_i8(Num.min_i8), Json.utf8)
+    expected = Str.to_utf8("-128")
+    actual == expected
+expect
+    actual = Encode.to_bytes(from_i8(Num.max_i8), Json.utf8)
+    expected = Str.to_utf8("127")
+    actual == expected
 
 from_i16 : I16 -> Value
+from_i16 = |x| @Value(Number(Num.to_frac(x)))
+
+expect
+    actual = Encode.to_bytes(from_i16(Num.min_i16), Json.utf8)
+    expected = Str.to_utf8("-32768")
+    actual == expected
+expect
+    actual = Encode.to_bytes(from_i16(Num.max_i16), Json.utf8)
+    expected = Str.to_utf8("32767")
+    actual == expected
 
 from_i32 : I32 -> Value
+from_i32 = |x| @Value(Number(Num.to_frac(x)))
+
+expect
+    actual = Encode.to_bytes(from_i32(Num.min_i32), Json.utf8)
+    expected = Str.to_utf8("-2147483648")
+    actual == expected
+expect
+    actual = Encode.to_bytes(from_i32(Num.max_i32), Json.utf8)
+    expected = Str.to_utf8("2147483647")
+    actual == expected
 
 from_i64 : I64 -> Value
+from_i64 = |x| @Value(Number(Num.to_frac(x)))
+
+expect
+    actual = Encode.to_bytes(from_i64(Num.min_i64), Json.utf8)
+    expected = Str.to_utf8("-9223372036854775808")
+    actual == expected
+expect
+    actual = Encode.to_bytes(from_i64(Num.max_i64), Json.utf8)
+    expected = Str.to_utf8("9223372036854775807")
+    actual == expected
 
 from_u8 : U8 -> Value
+from_u8 = |x| @Value(Number(Num.to_frac(x)))
+
+expect
+    actual = Encode.to_bytes(from_u8(Num.min_u8), Json.utf8)
+    expected = Str.to_utf8("0")
+    actual == expected
+expect
+    actual = Encode.to_bytes(from_u8(Num.max_u8), Json.utf8)
+    expected = Str.to_utf8("255")
+    actual == expected
 
 from_u16 : U16 -> Value
+from_u16 = |x| @Value(Number(Num.to_frac(x)))
+
+expect
+    actual = Encode.to_bytes(from_u16(Num.min_u16), Json.utf8)
+    expected = Str.to_utf8("0")
+    actual == expected
+expect
+    actual = Encode.to_bytes(from_u16(Num.max_u16), Json.utf8)
+    expected = Str.to_utf8("65535")
+    actual == expected
 
 from_u32 : U32 -> Value
+from_u32 = |x| @Value(Number(Num.to_frac(x)))
+
+expect
+    actual = Encode.to_bytes(from_u32(Num.min_u32), Json.utf8)
+    expected = Str.to_utf8("0")
+    actual == expected
+expect
+    actual = Encode.to_bytes(from_u32(Num.max_u32), Json.utf8)
+    expected = Str.to_utf8("4294967295")
+    actual == expected
 
 from_u64 : U64 -> Value
+from_u64 = |x| @Value(Number(Num.to_frac(x)))
+
+expect
+    actual = Encode.to_bytes(from_u64(Num.min_u64), Json.utf8)
+    expected = Str.to_utf8("0")
+    actual == expected
+expect
+    actual = Encode.to_bytes(from_u64(Num.max_u64), Json.utf8)
+    expected = Str.to_utf8("18446744073709551615")
+    actual == expected
 
 from_dec : Dec -> Value
-from_dec = |x| @Value(Number x)
+from_dec = |x| @Value(Number(x))
+
+expect
+    actual = Encode.to_bytes(from_dec(0), Json.utf8)
+    expected = Str.to_utf8("0")
+    actual == expected
+
+expect
+    actual = Encode.to_bytes(from_dec(1.5), Json.utf8)
+    expected = Str.to_utf8("1.5")
+    actual == expected
+
+expect
+    actual = Encode.to_bytes(from_dec(-1.5), Json.utf8)
+    expected = Str.to_utf8("-1.5")
+    actual == expected
 
 null_val : Value
 null_val = @Value(Null)
 
+expect
+    actual = Encode.to_bytes(null_val, Json.utf8)
+    expected = Str.to_utf8("null")
+    actual == expected
+
 from_list : List a, (a -> Value) -> Value
+from_list = |items, fun|
+    @Value(Array(List.map(items, fun)))
+
+expect
+    actual = Encode.to_bytes(from_list(["a", "b", "c"], from_string), Json.utf8)
+    expected = Str.to_utf8("[\"a\",\"b\",\"c\"]")
+    actual == expected
+
+expect
+    actual = Encode.to_bytes(from_list([], from_string), Json.utf8)
+    expected = Str.to_utf8("[]")
+    actual == expected
+
+expect
+    actual = Encode.to_bytes(from_list([Bool.true, Bool.false], from_bool), Json.utf8)
+    expected = Str.to_utf8("[true,false]")
+    actual == expected
 
 from_list_val : List Value -> Value
+from_list_val = |vals| @Value(Array(vals))
 
-from_object : List (Str, Value) -> Value
+expect
+    actual = Encode.to_bytes(from_list_val([null_val, from_string("a"), from_bool(Bool.true)]), Json.utf8)
+    expected = Str.to_utf8("[null,\"a\",true]")
+    actual == expected
 
-from_dict : Dict key value, (key -> Str, (value -> Value)) -> Value
+from_key_value_pairs : List (Str, Value) -> Value
+from_key_value_pairs = |pairs| @Value(Object(Dict.from_list(pairs)))
+
+expect
+    val = from_key_value_pairs(
+        [
+            ("msg", from_string("hello")),
+            ("world", from_bool(Bool.true)),
+        ],
+    )
+    actual = Encode.to_bytes(val, Json.utf8)
+    expected = Str.to_utf8("{\"msg\":\"hello\",\"world\":true}")
+    actual == expected
+
+from_dict : Dict Str Value -> Value
+from_dict = |obj| @Value(Object(obj))
+
+expect
+    val = from_dict(
+        Dict.from_list(
+            [
+                ("msg", from_string("hello")),
+                ("world", from_bool(Bool.true)),
+                ("n", null_val),
+                ("x", from_dec(42)),
+            ],
+        ),
+    )
+    actual = Encode.to_bytes(val, Json.utf8)
+    expected = Str.to_utf8("{\"msg\":\"hello\",\"world\":true,\"n\":null,\"x\":42}")
+    actual == expected
+
+expect
+    val = from_dict(
+        Dict.from_list(
+            [
+                ("msg", from_string("hello")),
+                ("world", from_bool(Bool.true)),
+            ],
+        ),
+    )
+    actual = Encode.to_bytes(val, Json.utf8)
+    expected = Str.to_utf8("{\"msg\":\"hello\",\"world\":true}")
+    actual == expected

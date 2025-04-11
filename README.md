@@ -26,8 +26,8 @@ This also means that this library does not have recipes for floating points numb
 - more number recipes DONE
 - more number encoding functions DONE
 - documentation for all exposed functions DONE enough
-- implementations
-- tests
+- implementations DONE
+- tests DONE
 - push to github
 - publish documentation
 - create release
