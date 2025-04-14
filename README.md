@@ -30,7 +30,7 @@ This also means that this library does not have recipes for floating points numb
 - tests DONE
 - push to github DONE
 - publish documentation DONE
-- create release
+- create release DONE
 - automate publishing documentation
 - automate tests
 - error_to_str
