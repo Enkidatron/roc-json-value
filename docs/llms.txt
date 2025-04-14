@@ -1,0 +1,728 @@
+# LLM Prompt for Documentation
+
+## Documentation
+
+### Value
+
+#### Value
+
+**Type Annotation**
+
+**Description**
+
+An opaque type that represents a JSON value.
+This has been deserialized and confirmed to be valid JSON.
+
+Implements the Eq, Decoding, and Encoding abilities.
+
+#### decoder
+
+**Type Annotation**
+
+```roc
+Decoder Value Json.Json
+```
+
+#### Recipe
+
+**Type Annotation**
+
+**Description**
+
+An opaque data type for attempting to turn a `Value` into your own data type.
+
+#### Error
+
+**Type Annotation**
+
+**Description**
+
+Tag union of possible errors when decoding using a recipe.
+
+#### RecipeError
+
+**Type Annotation**
+
+#### FailureReason
+
+**Type Annotation**
+
+#### decode_str
+
+**Type Annotation**
+
+```roc
+Str, Recipe output -> Result output Error
+```
+
+**Description**
+
+Applies a recipe to a string. This parses the string into a `Value` and then applies the
+recipe to the resulting value.
+
+#### decode_bytes
+
+**Type Annotation**
+
+```roc
+List U8, Recipe output -> Result output Error
+```
+
+**Description**
+
+Applies a recipe to utf-8 bytes. This parses the bytes into a `Value` and then applies the
+recipe to the resulting value.
+
+#### decode_val
+
+**Type Annotation**
+
+```roc
+Value, Recipe output -> Result output Error
+```
+
+**Description**
+
+Applies a recipe to a value. This value may have been left over from a previous decoding.
+
+#### string
+
+**Type Annotation**
+
+```roc
+Recipe Str
+```
+
+**Description**
+
+Decode a Json string into a Roc `Str`.
+
+#### bool
+
+**Type Annotation**
+
+```roc
+Recipe Bool
+```
+
+**Description**
+
+Decode a Json boolean into a Roc `Bool`.
+
+#### i8
+
+**Type Annotation**
+
+```roc
+Recipe I8
+```
+
+**Description**
+
+Decode a Json number into a Roc `I8`. Silently discards decimals. Will fail if the number is out of range.
+
+#### i16
+
+**Type Annotation**
+
+```roc
+Recipe I16
+```
+
+**Description**
+
+Decode a Json number into a Roc `I16`. Silently discards decimals. Will fail if the number is out of range.
+
+#### i32
+
+**Type Annotation**
+
+```roc
+Recipe I32
+```
+
+**Description**
+
+Decode a Json number into a Roc `I32`. Silently discards decimals. Will fail if the number is out of range.
+
+#### i64
+
+**Type Annotation**
+
+```roc
+Recipe I64
+```
+
+**Description**
+
+Decode a Json number into a Roc `I64`. Silently discards decimals. Will fail if the number is out of range.
+Under the hood, parses into a `Dec` and then uses Num.floor and Num.to_i64_checked, so there is some
+weirdness with some numbers (like 92233720368547759000).
+
+#### u8
+
+**Type Annotation**
+
+```roc
+Recipe U8
+```
+
+**Description**
+
+Decodes a Json number into a Roc `U8`. Silently discards decimals. Will fail if the number is out of range.
+
+#### u16
+
+**Type Annotation**
+
+```roc
+Recipe U16
+```
+
+**Description**
+
+Decodes a Json number into a Roc `U16`. Silently discards decimals. Will fail if the number is out of range.
+
+#### u32
+
+**Type Annotation**
+
+```roc
+Recipe U32
+```
+
+**Description**
+
+Decodes a Json number into a Roc `U32`. Silently discards decimals. Will fail if the number is out of range.
+
+#### u64
+
+**Type Annotation**
+
+```roc
+Recipe U64
+```
+
+**Description**
+
+Decodes a Json number into a Roc `U64`. Silently discards decimals. Will fail if the number is out of range.
+
+#### dec
+
+**Type Annotation**
+
+```roc
+Recipe Dec
+```
+
+**Description**
+
+Decodes a Json number into a Roc `Dec`.
+
+#### list
+
+**Type Annotation**
+
+```roc
+Recipe a -> Recipe (List a)
+```
+
+**Description**
+
+Decodes a Json array into a Roc `List`.
+
+#### dict
+
+**Type Annotation**
+
+```roc
+Recipe a -> Recipe (Dict Str a)
+```
+
+**Description**
+
+Decodes a Json object into a Roc `Dict`.
+
+#### key_value_pairs
+
+**Type Annotation**
+
+```roc
+
+    Recipe a
+    -> Recipe (List 
+        (
+            Str,
+            a
+        ))
+```
+
+**Description**
+
+Decodes a Json object into a Roc `List` of pairs.
+
+#### build_record
+
+**Type Annotation**
+
+```roc
+
+    Recipe a, 
+    Recipe b, 
+    (a, b -> c)
+    -> Recipe c
+```
+
+**Description**
+
+For use with [Record Builder](https://www.roc-lang.org/examples/RecordBuilder/README.html).
+This is identical to `map2`, but the Record Builder looks nicer with this name.
+
+#### field
+
+**Type Annotation**
+
+```roc
+Recipe a, Str -> Recipe a
+```
+
+**Description**
+
+Decode a required field from a Json object.
+
+#### at
+
+**Type Annotation**
+
+```roc
+Recipe a, List Str -> Recipe a
+```
+
+**Description**
+
+Decode a field from a nested Json object, requiring all fields to be present.
+
+#### index
+
+**Type Annotation**
+
+```roc
+Recipe a, U64 -> Recipe a
+```
+
+**Description**
+
+Decode something from a specific index in a Json array.
+
+#### optional_field
+
+**Type Annotation**
+
+```roc
+
+    Recipe a, 
+    Str, 
+    a
+    -> Recipe a
+```
+
+**Description**
+
+Decode an optional field from a Json object. You must provide the value to use if the field is missing.
+
+#### nullable_field
+
+**Type Annotation**
+
+```roc
+
+    Recipe a, 
+    Str, 
+    a
+    -> Recipe a
+```
+
+**Description**
+
+Decode a field that may be `null` from a Json object. You must provide the value to use if the field is `null`.
+
+#### optional_nullable_field
+
+**Type Annotation**
+
+```roc
+
+    Recipe a, 
+    Str, 
+    a
+    -> Recipe a
+```
+
+**Description**
+
+Decode an optional field that may be `null` from a Json object. You must provide the value to use if the field is missing or is `null`.
+
+#### one_of
+
+**Type Annotation**
+
+```roc
+List (Recipe a) -> Recipe a
+```
+
+**Description**
+
+Try multiple decoders until one succeeds.
+
+#### map
+
+**Type Annotation**
+
+```roc
+Recipe a, (a -> b) -> Recipe b
+```
+
+#### map2
+
+**Type Annotation**
+
+```roc
+
+    Recipe a, 
+    Recipe b, 
+    (a, b -> c)
+    -> Recipe c
+```
+
+#### map3
+
+**Type Annotation**
+
+```roc
+
+    Recipe a, 
+    Recipe b, 
+    Recipe c,     
+    (a, 
+    b, 
+    c
+    -> d)
+    -> Recipe d
+```
+
+#### map4
+
+**Type Annotation**
+
+```roc
+
+    Recipe a, 
+    Recipe b, 
+    Recipe c, 
+    Recipe d,     
+    (a, 
+    b, 
+    c, 
+    d
+    -> e)
+    -> Recipe e
+```
+
+#### map5
+
+**Type Annotation**
+
+```roc
+
+    Recipe a, 
+    Recipe b, 
+    Recipe c, 
+    Recipe d, 
+    Recipe e,     
+    (a, 
+    b, 
+    c, 
+    d, 
+    e
+    -> f)
+    -> Recipe f
+```
+
+#### map6
+
+**Type Annotation**
+
+```roc
+
+    Recipe a, 
+    Recipe b, 
+    Recipe c, 
+    Recipe d, 
+    Recipe e, 
+    Recipe f,     
+    (a, 
+    b, 
+    c, 
+    d, 
+    e, 
+    f
+    -> g)
+    -> Recipe g
+```
+
+#### map7
+
+**Type Annotation**
+
+```roc
+
+    Recipe a, 
+    Recipe b, 
+    Recipe c, 
+    Recipe d, 
+    Recipe e, 
+    Recipe f, 
+    Recipe g,     
+    (a, 
+    b, 
+    c, 
+    d, 
+    e, 
+    f, 
+    g
+    -> h)
+    -> Recipe h
+```
+
+#### map8
+
+**Type Annotation**
+
+```roc
+
+    Recipe a, 
+    Recipe b, 
+    Recipe c, 
+    Recipe d, 
+    Recipe e, 
+    Recipe f, 
+    Recipe g, 
+    Recipe h,     
+    (a, 
+    b, 
+    c, 
+    d, 
+    e, 
+    f, 
+    g, 
+    h
+    -> i)
+    -> Recipe i
+```
+
+#### value
+
+**Type Annotation**
+
+```roc
+Recipe Value
+```
+
+**Description**
+
+"Decode" this Json `Value` as a `Value`. Perhaps you are going to finish decoding it later.
+
+#### null
+
+**Type Annotation**
+
+```roc
+a -> Recipe a
+```
+
+**Description**
+
+Decode a `null` Json value into some Roc value of your choice.
+
+#### succeed
+
+**Type Annotation**
+
+```roc
+a -> Recipe a
+```
+
+**Description**
+
+Successfully "decode" the provided value, regardless of the Json.
+
+#### fail
+
+**Type Annotation**
+
+```roc
+Str -> Recipe a
+```
+
+**Description**
+
+Always fail. You provide the error message.
+
+#### and_then
+
+**Type Annotation**
+
+```roc
+Recipe a, (a -> Recipe b) -> Recipe b
+```
+
+**Description**
+
+Create decoders where the next stage depends on the results of the earlier stage.
+
+#### to_encoder
+
+**Type Annotation**
+
+```roc
+Value -> Encoder fmt
+    where fmt implements EncoderFormatting
+```
+
+#### from_string
+
+**Type Annotation**
+
+```roc
+Str -> Value
+```
+
+**Description**
+
+Create a `Value` from a `Str`. This can be useful if you want to encode variably-shaped data.
+
+#### from_bool
+
+**Type Annotation**
+
+```roc
+Bool -> Value
+```
+
+#### from_i8
+
+**Type Annotation**
+
+```roc
+I8 -> Value
+```
+
+#### from_i16
+
+**Type Annotation**
+
+```roc
+I16 -> Value
+```
+
+#### from_i32
+
+**Type Annotation**
+
+```roc
+I32 -> Value
+```
+
+#### from_i64
+
+**Type Annotation**
+
+```roc
+I64 -> Value
+```
+
+#### from_u8
+
+**Type Annotation**
+
+```roc
+U8 -> Value
+```
+
+#### from_u16
+
+**Type Annotation**
+
+```roc
+U16 -> Value
+```
+
+#### from_u32
+
+**Type Annotation**
+
+```roc
+U32 -> Value
+```
+
+#### from_u64
+
+**Type Annotation**
+
+```roc
+U64 -> Value
+```
+
+#### from_dec
+
+**Type Annotation**
+
+```roc
+Dec -> Value
+```
+
+#### null_val
+
+**Type Annotation**
+
+```roc
+Value
+```
+
+#### from_list
+
+**Type Annotation**
+
+```roc
+List a, (a -> Value) -> Value
+```
+
+#### from_list_val
+
+**Type Annotation**
+
+```roc
+List Value -> Value
+```
+
+#### from_key_value_pairs
+
+**Type Annotation**
+
+```roc
+    List 
+    (
+        Str,
+        Value
+    )
+    -> Value
+```
+
+#### from_dict
+
+**Type Annotation**
+
+```roc
+Dict Str Value -> Value
+```
+
