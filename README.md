@@ -11,9 +11,9 @@ roc run examples/simple1.roc
 
 ## Documentation
 
-TODO: add link to documentation
+[Documentation](https://enkidatron.github.io/roc-json-value/)
 
-You can generate the documentation locally using `roc docs package/main.roc` and then serving the html files using your favorite local web server.
+You can also generate the documentation locally using `roc docs package/main.roc` and then serving the html files using your favorite local web server.
 
 ## Notes about floating point numbers
 
@@ -29,7 +29,7 @@ This also means that this library does not have recipes for floating points numb
 - implementations DONE
 - tests DONE
 - push to github DONE
-- publish documentation
+- publish documentation DONE
 - create release
 - automate publishing documentation
 - automate tests
