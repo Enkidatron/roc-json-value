@@ -28,8 +28,9 @@ This also means that this library does not have recipes for floating points numb
 - documentation for all exposed functions DONE enough
 - implementations DONE
 - tests DONE
-- push to github
+- push to github DONE
 - publish documentation
 - create release
 - automate publishing documentation
 - automate tests
+- error_to_str
